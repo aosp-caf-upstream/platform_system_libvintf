@@ -22,6 +22,7 @@
 #include "CompatibilityMatrix.h"
 #include "DisabledChecks.h"
 #include "HalManifest.h"
+#include "Named.h"
 #include "RuntimeInfo.h"
 
 namespace android {
@@ -110,11 +111,62 @@ public:
     static int32_t CheckCompatibility(const std::vector<std::string>& packageInfo,
                                       std::string* error = nullptr,
                                       DisabledChecks disabledChecks = ENABLE_ALL_CHECKS);
+
+    using IsInstanceInUse = std::function<std::pair<bool, Version>(
+        const std::string& package, Version version, const std::string& interface,
+        const std::string& instance)>;
+    /**
+     * Check deprecation on framework matrices with a provided predicate.
+     *
+     * @param isInstanceInUse predicate that takes parameter in this format:
+     *        android.hardware.foo@1.0::IFoo/instance
+     *        and returns {true, version} if HAL is in use, where version =
+     *        first version in interfaceChain where package + major version matches.
+     *
+     * @return = 0 if success (no deprecated HALs)
+     *         > 0 if there is at least one deprecated HAL
+     *         < 0 if any error (mount partition fails, illformed XML, etc.)
+     */
+    static int32_t CheckDeprecation(const IsInstanceInUse& isInstanceInUse,
+                                    std::string* error = nullptr);
+
+    /**
+     * Check deprecation on existing VINTF metadata. Use Device Manifest as the
+     * predicate to check if a HAL is in use.
+     *
+     * @return = 0 if success (no deprecated HALs)
+     *         > 0 if there is at least one deprecated HAL
+     *         < 0 if any error (mount partition fails, illformed XML, etc.)
+     */
+    static int32_t CheckDeprecation(std::string* error = nullptr);
+
+   private:
+    static status_t GetCombinedFrameworkMatrix(
+        const std::shared_ptr<const HalManifest>& deviceManifest, CompatibilityMatrix* out,
+        std::string* error = nullptr);
+    static std::vector<Named<CompatibilityMatrix>> GetAllFrameworkMatrixLevels(
+        std::string* error = nullptr);
+    static status_t FetchDeviceHalManifest(HalManifest* out, std::string* error = nullptr);
+    static status_t FetchDeviceMatrix(CompatibilityMatrix* out, std::string* error = nullptr);
+    static status_t FetchOdmHalManifest(HalManifest* out, std::string* error = nullptr);
+    static status_t FetchOneHalManifest(const std::string& path, HalManifest* out,
+                                        std::string* error = nullptr);
+
+    static bool isHalDeprecated(const MatrixHal& oldMatrixHal,
+                                const CompatibilityMatrix& targetMatrix,
+                                const IsInstanceInUse& isInstanceInUse, std::string* error);
+    static bool isInstanceDeprecated(const std::string& package, Version version,
+                                     const std::string& interface, const std::string& instance,
+                                     const CompatibilityMatrix& targetMatrix,
+                                     const IsInstanceInUse& isInstanceInUse, std::string* error);
 };
 
 enum : int32_t {
     COMPATIBLE = 0,
     INCOMPATIBLE = 1,
+
+    NO_DEPRECATED_HALS = 0,
+    DEPRECATED = 1,
 };
 
 // exposed for testing and VintfObjectRecovery.
@@ -123,6 +175,20 @@ class PartitionMounter;
 int32_t checkCompatibility(const std::vector<std::string>& xmls, bool mount,
                            const PartitionMounter& partitionMounter, std::string* error,
                            DisabledChecks disabledChecks = ENABLE_ALL_CHECKS);
+
+extern const std::string kSystemVintfDir;
+extern const std::string kVendorVintfDir;
+extern const std::string kOdmVintfDir;
+extern const std::string kOdmLegacyVintfDir;
+extern const std::string kOdmLegacyManifest;
+extern const std::string kVendorManifest;
+extern const std::string kSystemManifest;
+extern const std::string kVendorMatrix;
+extern const std::string kOdmManifest;
+extern const std::string kVendorLegacyManifest;
+extern const std::string kVendorLegacyMatrix;
+extern const std::string kSystemLegacyMatrix;
+
 } // namespace details
 
 } // namespace vintf

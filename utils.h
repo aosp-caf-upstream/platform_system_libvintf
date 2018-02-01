@@ -17,8 +17,11 @@
 #ifndef ANDROID_VINTF_UTILS_H
 #define ANDROID_VINTF_UTILS_H
 
+#include <dirent.h>
+
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 
 #include <utils/Errors.h>
@@ -43,7 +46,7 @@ class FileFetcher {
             if (error) {
                 *error = "Cannot open " + path;
             }
-            return INVALID_OPERATION;
+            return NAME_NOT_FOUND;
         }
 
         std::stringstream ss;
@@ -57,6 +60,24 @@ class FileFetcher {
     }
     virtual status_t fetch(const std::string& path, std::string& fetched) {
         return fetchInternal(path, fetched, nullptr);
+    }
+    virtual status_t listFiles(const std::string& path, std::vector<std::string>* out,
+                               std::string* error) {
+        std::unique_ptr<DIR, decltype(&closedir)> dir(opendir(path.c_str()), closedir);
+        if (!dir) {
+            if (error) {
+                *error = "Cannot open " + path;
+            }
+            return NAME_NOT_FOUND;
+        }
+
+        dirent* dp;
+        while ((dp = readdir(dir.get())) != nullptr) {
+            if (dp->d_type != DT_DIR) {
+                out->push_back(dp->d_name);
+            }
+        }
+        return OK;
     }
 };
 

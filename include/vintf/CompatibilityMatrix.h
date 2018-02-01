@@ -30,6 +30,7 @@
 #include "Named.h"
 #include "SchemaType.h"
 #include "Sepolicy.h"
+#include "SystemSdk.h"
 #include "VendorNdk.h"
 #include "Vndk.h"
 #include "XmlFileGroup.h"
@@ -70,6 +71,8 @@ struct CompatibilityMatrix : public HalGroup<MatrixHal>, public XmlFileGroup<Mat
     // Return nullptr if none is found.
     std::pair<MatrixHal*, VersionRange*> getHalWithMajorVersion(const std::string& name,
                                                                 size_t majorVer);
+    std::pair<const MatrixHal*, const VersionRange*> getHalWithMajorVersion(const std::string& name,
+                                                                            size_t majorVer) const;
     // Similar to addAllHalsAsOptional but on <xmlfile> entries.
     bool addAllXmlFilesAsOptional(CompatibilityMatrix* other, std::string* error);
 
@@ -82,6 +85,7 @@ struct CompatibilityMatrix : public HalGroup<MatrixHal>, public XmlFileGroup<Mat
     // - If level() == deviceLevel, all HAL versions and XML files are added as is
     //   (optionality is kept)
     // - If level() > deviceLevel, all HAL versions and XML files are added as optional.
+    // Return a pointer into one of the elements in "matrices".
     static CompatibilityMatrix* combine(Level deviceLevel,
                                         std::vector<Named<CompatibilityMatrix>>* matrices,
                                         std::string* error);
@@ -114,6 +118,7 @@ struct CompatibilityMatrix : public HalGroup<MatrixHal>, public XmlFileGroup<Mat
 #pragma clang diagnostic pop
 
         VendorNdk mVendorNdk;
+        SystemSdk mSystemSdk;
     } device;
 };
 

@@ -232,6 +232,33 @@ TEST_F(LibVintfTest, GetTransport) {
             {2, 0}, "ICamera", "default"));
 }
 
+TEST_F(LibVintfTest, FutureManifestCompatible) {
+    HalManifest expectedManifest;
+    expectedManifest.add(ManifestHal{.format = HalFormat::HIDL,
+                                     .name = "android.hardware.foo",
+                                     .versions = {Version(1, 0)},
+                                     .transportArch = {Transport::HWBINDER, Arch::ARCH_EMPTY},
+                                     .interfaces = {
+                                         {"IFoo", {"IFoo", {"default"}}},
+                                     }});
+    std::string manifestXml =
+        "<manifest version=\"1.0\" type=\"device\" might_add=\"true\">\n"
+        "    <hal format=\"hidl\" attribuet_might_be_added=\"value\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.0</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>default</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "    <tag_might_be_added/>\n"
+        "</manifest>\n";
+    HalManifest manifest;
+    EXPECT_TRUE(gHalManifestConverter(&manifest, manifestXml));
+    EXPECT_EQ(expectedManifest, manifest);
+}
+
 TEST_F(LibVintfTest, HalManifestConverter) {
     HalManifest vm = testDeviceManifest();
     std::string xml = gHalManifestConverter(vm);
@@ -1328,15 +1355,9 @@ TEST_F(LibVintfTest, HalManifestConverterXmlFile) {
 TEST_F(LibVintfTest, CompatibilityMatrixConverterXmlFile) {
     CompatibilityMatrix cm;
     addXmlFile(cm, "media_profile", {1, 0});
-    std::string xml = gCompatibilityMatrixConverter(cm);
+    std::string xml = gCompatibilityMatrixConverter(cm, SerializeFlag::XMLFILES_ONLY);
     EXPECT_EQ(xml,
               "<compatibility-matrix version=\"1.0\" type=\"framework\">\n"
-              "    <sepolicy>\n"
-              "        <kernel-sepolicy-version>0</kernel-sepolicy-version>\n"
-              "    </sepolicy>\n"
-              "    <avb>\n"
-              "        <vbmeta-version>0.0</vbmeta-version>\n"
-              "    </avb>\n"
               "    <xmlfile format=\"dtd\" optional=\"true\">\n"
               "        <name>media_profile</name>\n"
               "        <version>1.0</version>\n"
@@ -2386,6 +2407,328 @@ TEST_F(LibVintfTest, MissingVendorNdkInMatrix) {
         EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
 
         EXPECT_TRUE(manifest.checkCompatibility(cm, &error)) << error;
+    }
+}
+
+TEST_F(LibVintfTest, ManifestHalOverride) {
+    HalManifest manifest;
+    std::string xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.0</version>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.bar</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.0</version>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+    const ManifestHal* foo = manifest.getHal("android.hardware.foo", {1, 0});
+    ASSERT_NE(nullptr, foo);
+    EXPECT_TRUE(foo->isOverride);
+    const ManifestHal* bar = manifest.getHal("android.hardware.bar", {1, 0});
+    ASSERT_NE(nullptr, bar);
+    EXPECT_FALSE(bar->isOverride);
+}
+
+// Test functionality of override="true" tag
+TEST_F(LibVintfTest, ManifestAddOverrideHalSimple) {
+    HalManifest manifest;
+    std::string xml = "<manifest version=\"1.0\" type=\"device\"/>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+
+    HalManifest newManifest;
+    xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.1</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>default</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&newManifest, xml)) << gHalManifestConverter.lastError();
+
+    manifest.addAllHals(&newManifest);
+    EXPECT_EQ(xml, gHalManifestConverter(manifest, SerializeFlag::HALS_ONLY));
+}
+
+TEST_F(LibVintfTest, ManifestAddOverrideHalSimpleOverride) {
+    HalManifest manifest;
+    std::string xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.0</version>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+
+    HalManifest newManifest;
+    xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.1</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>default</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&newManifest, xml)) << gHalManifestConverter.lastError();
+
+    manifest.addAllHals(&newManifest);
+    EXPECT_EQ(xml, gHalManifestConverter(manifest, SerializeFlag::HALS_ONLY));
+}
+
+// Existing major versions should be removed.
+TEST_F(LibVintfTest, ManifestAddOverrideHalMultiVersion) {
+    HalManifest manifest;
+    std::string xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "        <version>2.4</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot1</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.bar</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+
+    HalManifest newManifest;
+    xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.1</version>\n"
+        "        <version>3.1</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot2</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&newManifest, xml)) << gHalManifestConverter.lastError();
+
+    manifest.addAllHals(&newManifest);
+    EXPECT_EQ(
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.bar</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>2.4</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot1</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.1</version>\n"
+        "        <version>3.1</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot2</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n",
+        gHalManifestConverter(manifest, SerializeFlag::HALS_ONLY));
+}
+
+TEST_F(LibVintfTest, ManifestAddOverrideHalMultiVersion2) {
+    HalManifest manifest;
+    std::string xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "        <version>2.4</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot1</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+
+    HalManifest newManifest;
+    xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.1</version>\n"
+        "        <version>2.1</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot2</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&newManifest, xml)) << gHalManifestConverter.lastError();
+
+    manifest.addAllHals(&newManifest);
+    EXPECT_EQ(xml, gHalManifestConverter(manifest, SerializeFlag::HALS_ONLY));
+}
+
+// if no <versions>, remove all existing <hal> with given <name>.
+TEST_F(LibVintfTest, ManifestAddOverrideHalRemoveAll) {
+    HalManifest manifest;
+    std::string xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "        <version>2.4</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>slot1</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>3.1</version>\n"
+        "        <version>4.3</version>\n"
+        "        <interface>\n"
+        "            <name>IBar</name>\n"
+        "            <instance>slot2</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.bar</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+
+    HalManifest newManifest;
+    xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    EXPECT_TRUE(gHalManifestConverter(&newManifest, xml)) << gHalManifestConverter.lastError();
+
+    manifest.addAllHals(&newManifest);
+    EXPECT_EQ(
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.bar</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.3</version>\n"
+        "    </hal>\n"
+        "    <hal format=\"hidl\" override=\"true\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "    </hal>\n"
+        "</manifest>\n",
+        gHalManifestConverter(manifest, SerializeFlag::HALS_ONLY));
+}
+
+// Make sure missing tags in old VINTF files does not cause incompatibilities.
+TEST_F(LibVintfTest, Empty) {
+    CompatibilityMatrix cm;
+    HalManifest manifest;
+    std::string xml;
+    std::string error;
+
+    xml = "<compatibility-matrix version=\"1.0\" type=\"device\"/>\n";
+    EXPECT_TRUE(gCompatibilityMatrixConverter(&cm, xml))
+        << gCompatibilityMatrixConverter.lastError();
+
+    xml = "<manifest version=\"1.0\" type=\"framework\"/>\n";
+    EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+
+    EXPECT_TRUE(manifest.checkCompatibility(cm, &error)) << error;
+}
+
+TEST_F(LibVintfTest, SystemSdk) {
+    CompatibilityMatrix cm;
+    std::string xml;
+    std::string error;
+
+    xml =
+        "<compatibility-matrix version=\"1.0\" type=\"device\">\n"
+        "    <system-sdk>\n"
+        "        <version>1</version>\n"
+        "        <version>P</version>\n"
+        "    </system-sdk>\n"
+        "</compatibility-matrix>\n";
+    EXPECT_TRUE(gCompatibilityMatrixConverter(&cm, xml))
+        << gCompatibilityMatrixConverter.lastError();
+    EXPECT_EQ(xml, gCompatibilityMatrixConverter(cm, ~SerializeFlag::NO_SSDK));
+
+    {
+        HalManifest manifest;
+        xml =
+            "<manifest version=\"1.0\" type=\"framework\">\n"
+            "    <system-sdk>\n"
+            "        <version>1</version>\n"
+            "        <version>P</version>\n"
+            "    </system-sdk>\n"
+            "</manifest>\n";
+        EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+        EXPECT_EQ(xml, gHalManifestConverter(manifest, ~SerializeFlag::NO_SSDK));
+
+        EXPECT_TRUE(manifest.checkCompatibility(cm, &error)) << error;
+    }
+
+    {
+        HalManifest manifest;
+        xml =
+            "<manifest version=\"1.0\" type=\"framework\">\n"
+            "    <system-sdk>\n"
+            "        <version>1</version>\n"
+            "        <version>3</version>\n"
+            "        <version>P</version>\n"
+            "    </system-sdk>\n"
+            "</manifest>\n";
+        EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+        EXPECT_TRUE(manifest.checkCompatibility(cm, &error));
+    }
+
+    {
+        HalManifest manifest;
+        xml =
+            "<manifest version=\"1.0\" type=\"framework\">\n"
+            "    <system-sdk>\n"
+            "        <version>1</version>\n"
+            "    </system-sdk>\n"
+            "</manifest>\n";
+        EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
+        EXPECT_FALSE(manifest.checkCompatibility(cm, &error));
+        EXPECT_TRUE(error.find("System SDK") != std::string::npos) << error;
     }
 }
 

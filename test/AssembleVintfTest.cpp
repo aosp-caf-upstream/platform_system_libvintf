@@ -77,11 +77,12 @@ TEST_F(AssembleVintfTest, FrameworkMatrixEmpty) {
         {"BOARD_SEPOLICY_VERS", "10000.0"},
         {"FRAMEWORK_VBMETA_VERSION", "1.0"},
     });
-    getInstance()->addKernelConfigInputStream({3, 18}, "android-base.cfg", makeStream(kernel318));
-    getInstance()->addKernelConfigInputStream({3, 18}, "android-base-arm64.cfg",
+    getInstance()->addKernelConfigInputStream({3, 18, 0}, "android-base.cfg",
+                                              makeStream(kernel318));
+    getInstance()->addKernelConfigInputStream({3, 18, 0}, "android-base-arm64.cfg",
                                               makeStream(kernel318_64));
-    getInstance()->addKernelConfigInputStream({4, 4}, "android-base.cfg", makeStream(kernel44));
-    getInstance()->addKernelConfigInputStream({4, 4}, "android-base-arm64.cfg",
+    getInstance()->addKernelConfigInputStream({4, 4, 0}, "android-base.cfg", makeStream(kernel44));
+    getInstance()->addKernelConfigInputStream({4, 4, 0}, "android-base-arm64.cfg",
                                               makeStream(kernel44_64));
 
     EXPECT_TRUE(getInstance()->assemble());
@@ -354,6 +355,37 @@ TEST_F(AssembleVintfTest, VendorNdkCheckCompat) {
         "</compatibility-matrix>\n";
     getInstance()->setCheckInputStream(makeStream(matrix));
     EXPECT_TRUE(getInstance()->assemble());
+}
+
+TEST_F(AssembleVintfTest, MatrixSystemSdk) {
+    addInput("compatibility_matrix.xml",
+             "<compatibility-matrix version=\"1.0\" type=\"device\"/>\n");
+    getInstance()->setFakeEnv("BOARD_SYSTEMSDK_VERSIONS", "P 1 2 ");
+    EXPECT_TRUE(getInstance()->assemble());
+    EXPECT_IN(
+        "<compatibility-matrix version=\"1.0\" type=\"device\">\n"
+        "    <system-sdk>\n"
+        "        <version>1</version>\n"
+        "        <version>2</version>\n"
+        "        <version>P</version>\n"
+        "    </system-sdk>\n"
+        "</compatibility-matrix>\n",
+        getOutput());
+}
+
+TEST_F(AssembleVintfTest, ManifestSystemSdk) {
+    addInput("manifest.xml", "<manifest version=\"1.0\" type=\"framework\"/>\n");
+    getInstance()->setFakeEnv("PLATFORM_SYSTEMSDK_VERSIONS", "P 1 2 ");
+    EXPECT_TRUE(getInstance()->assemble());
+    EXPECT_IN(
+        "<manifest version=\"1.0\" type=\"framework\">\n"
+        "    <system-sdk>\n"
+        "        <version>1</version>\n"
+        "        <version>2</version>\n"
+        "        <version>P</version>\n"
+        "    </system-sdk>\n"
+        "</manifest>\n",
+        getOutput());
 }
 
 }  // namespace vintf
