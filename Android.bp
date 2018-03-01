@@ -67,9 +67,6 @@ cc_library {
             srcs: [
                 "RuntimeInfo-host.cpp"
             ],
-            cflags: [
-                "-DLIBVINTF_HOST",
-            ],
         },
         android: {
             shared_libs: [
@@ -89,6 +86,7 @@ cc_binary {
     name: "vintf",
     defaults: ["libvintf-defaults"],
     shared_libs: [
+        "libbase",
         "libvintf",
     ],
     srcs: [
