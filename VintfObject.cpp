@@ -295,11 +295,9 @@ std::vector<Named<CompatibilityMatrix>> VintfObject::GetAllFrameworkMatrixLevels
         }
 
         auto it = results.emplace(results.end());
-        if (!gCompatibilityMatrixConverter(&it->object, content)) {
+        if (!gCompatibilityMatrixConverter(&it->object, content, error)) {
             if (error) {
-                // TODO(b/71874788): do not use lastError() because it is not thread-safe.
-                *error +=
-                    "Ignore file " + path + ": " + gCompatibilityMatrixConverter.lastError() + "\n";
+                *error += "Ignore file " + path + ": " + *error + "\n";
             }
             results.erase(it);
             continue;
@@ -368,7 +366,7 @@ template<typename T>
 static ParseStatus tryParse(const std::string &xml, const XmlConverter<T> &parse,
         std::shared_ptr<T> *fwk, std::shared_ptr<T> *dev) {
     std::shared_ptr<T> ret = std::make_shared<T>();
-    if (!parse(ret.get(), xml)) {
+    if (!parse(ret.get(), xml, nullptr /* error */)) {
         return ParseStatus::PARSE_ERROR;
     }
     if (ret->type() == SchemaType::FRAMEWORK) {
@@ -492,7 +490,6 @@ int32_t checkCompatibility(const std::vector<std::string>& xmls, bool mount,
     updated.runtimeInfo = VintfObject::GetRuntimeInfo(true /* skipCache */);
 
     // null checks for files and runtime info after the update
-    // TODO(b/37321309) if a compat mat is missing, it is not matched and considered compatible.
     if (updated.fwk.manifest == nullptr) {
         ADD_MESSAGE("No framework manifest file from device or from update package");
         return NO_INIT;
@@ -502,12 +499,12 @@ int32_t checkCompatibility(const std::vector<std::string>& xmls, bool mount,
         return NO_INIT;
     }
     if (updated.fwk.matrix == nullptr) {
-        ADD_MESSAGE("No framework matrix, skipping;");
-        // TODO(b/37321309) consider missing matricies as errors.
+        ADD_MESSAGE("No framework matrix file from device or from update package");
+        return NO_INIT;
     }
     if (updated.dev.matrix == nullptr) {
-        ADD_MESSAGE("No device matrix, skipping;");
-        // TODO(b/37321309) consider missing matricies as errors.
+        ADD_MESSAGE("No device matrix file from device or from update package");
+        return NO_INIT;
     }
     if (updated.runtimeInfo == nullptr) {
         ADD_MESSAGE("No runtime info from device");
@@ -515,30 +512,25 @@ int32_t checkCompatibility(const std::vector<std::string>& xmls, bool mount,
     }
 
     // compatiblity check.
-    // TODO(b/37321309) outer if checks can be removed if we consider missing matrices as errors.
-    if (updated.dev.manifest && updated.fwk.matrix) {
-        if (!updated.dev.manifest->checkCompatibility(*updated.fwk.matrix, error)) {
-            if (error)
-                error->insert(0, "Device manifest and framework compatibility matrix "
-                                 "are incompatible: ");
-            return INCOMPATIBLE;
+    if (!updated.dev.manifest->checkCompatibility(*updated.fwk.matrix, error)) {
+        if (error) {
+            error->insert(0,
+                          "Device manifest and framework compatibility matrix are incompatible: ");
         }
+        return INCOMPATIBLE;
     }
-    if (updated.fwk.manifest && updated.dev.matrix) {
-        if (!updated.fwk.manifest->checkCompatibility(*updated.dev.matrix, error)) {
-            if (error)
-                error->insert(0, "Framework manifest and device compatibility matrix "
-                                 "are incompatible: ");
-            return INCOMPATIBLE;
+    if (!updated.fwk.manifest->checkCompatibility(*updated.dev.matrix, error)) {
+        if (error) {
+            error->insert(0,
+                          "Framework manifest and device compatibility matrix are incompatible: ");
         }
+        return INCOMPATIBLE;
     }
-    if (updated.runtimeInfo && updated.fwk.matrix) {
-        if (!updated.runtimeInfo->checkCompatibility(*updated.fwk.matrix, error, disabledChecks)) {
-            if (error)
-                error->insert(0, "Runtime info and framework compatibility matrix "
-                                 "are incompatible: ");
-            return INCOMPATIBLE;
+    if (!updated.runtimeInfo->checkCompatibility(*updated.fwk.matrix, error, disabledChecks)) {
+        if (error) {
+            error->insert(0, "Runtime info and framework compatibility matrix are incompatible: ");
         }
+        return INCOMPATIBLE;
     }
 
     return COMPATIBLE;
