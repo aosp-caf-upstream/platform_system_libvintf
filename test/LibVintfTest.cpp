@@ -32,12 +32,12 @@
 namespace android {
 namespace vintf {
 
-extern const XmlConverter<Version> &gVersionConverter;
-extern const XmlConverter<ManifestHal> &gManifestHalConverter;
-extern const XmlConverter<MatrixHal> &gMatrixHalConverter;
-extern const XmlConverter<KernelConfigTypedValue> &gKernelConfigTypedValueConverter;
-extern const XmlConverter<HalManifest> &gHalManifestConverter;
-extern const XmlConverter<CompatibilityMatrix> &gCompatibilityMatrixConverter;
+extern XmlConverter<Version>& gVersionConverter;
+extern XmlConverter<ManifestHal>& gManifestHalConverter;
+extern XmlConverter<MatrixHal>& gMatrixHalConverter;
+extern XmlConverter<KernelConfigTypedValue>& gKernelConfigTypedValueConverter;
+extern XmlConverter<HalManifest>& gHalManifestConverter;
+extern XmlConverter<CompatibilityMatrix>& gCompatibilityMatrixConverter;
 
 static bool In(const std::string& sub, const std::string& str) {
     return str.find(sub) != std::string::npos;
@@ -2746,6 +2746,129 @@ TEST_F(LibVintfTest, SystemSdk) {
         EXPECT_TRUE(gHalManifestConverter(&manifest, xml)) << gHalManifestConverter.lastError();
         EXPECT_FALSE(manifest.checkCompatibility(cm, &error));
         EXPECT_TRUE(error.find("System SDK") != std::string::npos) << error;
+    }
+}
+
+TEST_F(LibVintfTest, ManifestLastError) {
+    HalManifest e;
+    // Set mLastError to something else before testing.
+    EXPECT_FALSE(gHalManifestConverter(&e, "<manifest/>"));
+    EXPECT_NE("Not a valid XML", gHalManifestConverter.lastError());
+
+    std::string error;
+    std::string prevError = gHalManifestConverter.lastError();
+    EXPECT_FALSE(gHalManifestConverter(&e, "", &error));
+    EXPECT_EQ("Not a valid XML", error);
+    EXPECT_EQ(prevError, gHalManifestConverter.lastError()) << "lastError() should not be modified";
+}
+
+TEST_F(LibVintfTest, MatrixLastError) {
+    CompatibilityMatrix e;
+    // Set mLastError to something else before testing.
+    EXPECT_FALSE(gCompatibilityMatrixConverter(&e, "<compatibility-matrix/>"));
+    EXPECT_NE("Not a valid XML", gCompatibilityMatrixConverter.lastError());
+
+    std::string error;
+    std::string prevError = gCompatibilityMatrixConverter.lastError();
+    EXPECT_FALSE(gCompatibilityMatrixConverter(&e, "", &error));
+    EXPECT_EQ("Not a valid XML", error);
+    EXPECT_EQ(prevError, gCompatibilityMatrixConverter.lastError())
+        << "lastError() should not be modified";
+}
+
+TEST_F(LibVintfTest, MatrixDetailErrorMsg) {
+    std::string error;
+    std::string xml;
+
+    HalManifest manifest;
+    xml =
+        "<manifest version=\"1.0\" type=\"device\">\n"
+        "    <hal format=\"hidl\">\n"
+        "        <name>android.hardware.foo</name>\n"
+        "        <transport>hwbinder</transport>\n"
+        "        <version>1.0</version>\n"
+        "        <interface>\n"
+        "            <name>IFoo</name>\n"
+        "            <instance>default</instance>\n"
+        "        </interface>\n"
+        "    </hal>\n"
+        "</manifest>\n";
+    ASSERT_TRUE(gHalManifestConverter(&manifest, xml, &error)) << error;
+
+    {
+        CompatibilityMatrix cm;
+        xml =
+            "<compatibility-matrix version=\"1.0\" type=\"framework\">\n"
+            "    <hal format=\"hidl\" optional=\"false\">\n"
+            "        <name>android.hardware.foo</name>\n"
+            "        <version>1.2-3</version>\n"
+            "        <version>4.5</version>\n"
+            "        <interface>\n"
+            "            <name>IFoo</name>\n"
+            "            <instance>default</instance>\n"
+            "            <instance>slot1</instance>\n"
+            "        </interface>\n"
+            "        <interface>\n"
+            "            <name>IBar</name>\n"
+            "            <instance>default</instance>\n"
+            "        </interface>\n"
+            "    </hal>\n"
+            "</compatibility-matrix>\n";
+        EXPECT_TRUE(gCompatibilityMatrixConverter(&cm, xml, &error)) << error;
+        EXPECT_FALSE(manifest.checkCompatibility(cm, &error));
+        EXPECT_IN(
+            "android.hardware.foo:\n"
+            "    required: \n"
+            "        (@1.2-3::IBar/default AND @1.2-3::IFoo/default AND @1.2-3::IFoo/slot1) OR\n"
+            "        (@4.5::IBar/default AND @4.5::IFoo/default AND @4.5::IFoo/slot1)\n"
+            "    provided: @1.0::IFoo/default",
+            error);
+    }
+
+    {
+        CompatibilityMatrix cm;
+        xml =
+            "<compatibility-matrix version=\"1.0\" type=\"framework\">\n"
+            "    <hal format=\"hidl\" optional=\"false\">\n"
+            "        <name>android.hardware.foo</name>\n"
+            "        <version>1.2-3</version>\n"
+            "        <interface>\n"
+            "            <name>IFoo</name>\n"
+            "            <instance>default</instance>\n"
+            "            <instance>slot1</instance>\n"
+            "        </interface>\n"
+            "    </hal>\n"
+            "</compatibility-matrix>\n";
+        EXPECT_TRUE(gCompatibilityMatrixConverter(&cm, xml, &error)) << error;
+        EXPECT_FALSE(manifest.checkCompatibility(cm, &error));
+        EXPECT_IN(
+            "android.hardware.foo:\n"
+            "    required: (@1.2-3::IFoo/default AND @1.2-3::IFoo/slot1)\n"
+            "    provided: @1.0::IFoo/default",
+            error);
+    }
+
+    // the most frequent use case.
+    {
+        CompatibilityMatrix cm;
+        xml =
+            "<compatibility-matrix version=\"1.0\" type=\"framework\">\n"
+            "    <hal format=\"hidl\" optional=\"false\">\n"
+            "        <name>android.hardware.foo</name>\n"
+            "        <version>1.2-3</version>\n"
+            "        <interface>\n"
+            "            <name>IFoo</name>\n"
+            "            <instance>default</instance>\n"
+            "        </interface>\n"
+            "    </hal>\n"
+            "</compatibility-matrix>\n";
+        EXPECT_TRUE(gCompatibilityMatrixConverter(&cm, xml, &error)) << error;
+        EXPECT_FALSE(manifest.checkCompatibility(cm, &error));
+        EXPECT_IN(
+            "android.hardware.foo:\n"
+            "    required: @1.2-3::IFoo/default\n"
+            "    provided: @1.0::IFoo/default",
+            error);
     }
 }
 
