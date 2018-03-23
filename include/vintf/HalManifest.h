@@ -18,14 +18,15 @@
 #ifndef ANDROID_VINTF_HAL_MANIFEST_H
 #define ANDROID_VINTF_HAL_MANIFEST_H
 
+#include <utils/Errors.h>
 #include <map>
 #include <string>
-#include <utils/Errors.h>
 #include <vector>
 
 #include "HalGroup.h"
 #include "Level.h"
 #include "ManifestHal.h"
+#include "ManifestInstance.h"
 #include "MapValueIterator.h"
 #include "SchemaType.h"
 #include "SystemSdk.h"
@@ -61,17 +62,6 @@ struct HalManifest : public HalGroup<ManifestHal>, public XmlFileGroup<ManifestX
     // one of the versions in that component, else EMPTY
     Transport getTransport(const std::string &name, const Version &v,
             const std::string &interfaceName, const std::string &instanceName) const;
-
-    // Given a component name (e.g. "android.hardware.camera"),
-    // return a list of version numbers that are supported by the hardware.
-    // If the component is not found, empty list is returned.
-    // If multiple matches, return a concatenation of version entries
-    // (dupes removed)
-    std::set<Version> getSupportedVersions(const std::string &name) const;
-
-    // Convenience method for checking if instanceName is in getInstances(halName, interfaceName)
-    bool hasInstance(const std::string& halName, const Version& version,
-                     const std::string& interfaceName, const std::string& instanceName) const;
 
     // Check compatibility against a compatibility matrix. Considered compatible if
     // - framework manifest vs. device compat-mat
@@ -117,9 +107,9 @@ struct HalManifest : public HalGroup<ManifestHal>, public XmlFileGroup<ManifestX
     // Get metaversion of this manifest.
     Version getMetaVersion() const;
 
-    void forEachInstance(
-        const std::function<void(const std::string&, const Version&, const std::string&,
-                                 const std::string&, bool*)>& f) const;
+    bool forEachInstanceOfVersion(
+        const std::string& package, const Version& expectVersion,
+        const std::function<bool(const ManifestInstance&)>& func) const override;
 
    protected:
     // Check before add()
@@ -140,11 +130,20 @@ struct HalManifest : public HalGroup<ManifestHal>, public XmlFileGroup<ManifestX
     // Check if all instances in matrixHal is supported in this manifest.
     bool isCompatible(const details::Instances& instances, const MatrixHal& matrixHal) const;
 
-    // Return a list of instance names that does NOT conform to
+    // Return a list of error messages (for each <hal> name) that does NOT conform to
     // the given compatibility matrix. It does not contain components that are optional.
+    // That is, return empty list iff
+    // (instance in matrix) => (instance in manifest).
     std::vector<std::string> checkIncompatibleHals(const CompatibilityMatrix& mat) const;
 
     void removeHals(const std::string& name, size_t majorVer);
+
+    // Returns a list of instance names that are in this manifest but
+    // are not specified in the given matrix, whether the HAL is specified as an optional or
+    // required HAL.
+    // That is, return empty list iff
+    // (instance in manifest) => (instance in matrix).
+    std::set<std::string> checkUnusedHals(const CompatibilityMatrix& mat) const;
 
     SchemaType mType;
     Level mLevel = Level::UNSPECIFIED;

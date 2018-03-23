@@ -26,6 +26,7 @@
 #include "Level.h"
 #include "MapValueIterator.h"
 #include "MatrixHal.h"
+#include "MatrixInstance.h"
 #include "MatrixKernel.h"
 #include "Named.h"
 #include "SchemaType.h"
@@ -58,9 +59,9 @@ struct CompatibilityMatrix : public HalGroup<MatrixHal>, public XmlFileGroup<Mat
     // (Normally, version ranges do not overlap, and the only match is returned.)
     std::string getXmlSchemaPath(const std::string& xmlFileName, const Version& version) const;
 
-    void forEachInstance(
-        const std::function<void(const std::string&, const VersionRange&, const std::string&,
-                                 const std::string&, bool, bool*)>& f) const;
+    bool forEachInstanceOfVersion(
+        const std::string& package, const Version& expectVersion,
+        const std::function<bool(const MatrixInstance&)>& func) const override;
 
    private:
     bool add(MatrixHal &&hal);
@@ -70,13 +71,7 @@ struct CompatibilityMatrix : public HalGroup<MatrixHal>, public XmlFileGroup<Mat
     // from "other".
     // Require other->level() > this->level(), otherwise do nothing.
     bool addAllHalsAsOptional(CompatibilityMatrix* other, std::string* error);
-    // Return the MatrixHal object with the given name and major version. Since all major
-    // version are guaranteed distinct when add()-ed, there should be at most 1 match.
-    // Return nullptr if none is found.
-    std::pair<MatrixHal*, VersionRange*> getHalWithMajorVersion(const std::string& name,
-                                                                size_t majorVer);
-    std::pair<const MatrixHal*, const VersionRange*> getHalWithMajorVersion(const std::string& name,
-                                                                            size_t majorVer) const;
+
     // Similar to addAllHalsAsOptional but on <xmlfile> entries.
     bool addAllXmlFilesAsOptional(CompatibilityMatrix* other, std::string* error);
 
@@ -95,6 +90,9 @@ struct CompatibilityMatrix : public HalGroup<MatrixHal>, public XmlFileGroup<Mat
                                         std::string* error);
     static CompatibilityMatrix* findOrInsertBaseMatrix(
         std::vector<Named<CompatibilityMatrix>>* matrices, std::string* error);
+
+    MatrixHal* splitInstance(MatrixHal* existingHal, const std::string& interface,
+                             const std::string& instance);
 
     friend struct HalManifest;
     friend struct RuntimeInfo;
