@@ -75,31 +75,35 @@ std::string CompatibilityMatrix::getXmlSchemaPath(const std::string& xmlFileName
     return "";
 }
 
-static VersionRange* findRangeWithMajorVersion(std::vector<VersionRange>& versionRanges,
-                                               size_t majorVer) {
-    for (VersionRange& vr : versionRanges) {
-        if (vr.majorVer == majorVer) {
-            return &vr;
-        }
+// Split existingHal into a HAL that contains only interface/instance and a HAL
+// that does not contain it. Return the HAL that contains only interface/instance.
+// - Return nullptr if existingHal does not contain interface/instance
+// - Return existingHal if existingHal contains only interface/instance
+// - Remove interface/instance from existingHal, and return a new MatrixHal (that is added
+//   to "this") that contains only interface/instance.
+MatrixHal* CompatibilityMatrix::splitInstance(MatrixHal* existingHal, const std::string& interface,
+                                              const std::string& instance) {
+    if (!existingHal->hasInstance(interface, instance)) {
+        return nullptr;
     }
-    return nullptr;
+
+    if (existingHal->hasOnlyInstance(interface, instance)) {
+        return existingHal;
+    }
+
+    existingHal->removeInstance(interface, instance);
+    MatrixHal copy = *existingHal;
+    copy.clearInstances();
+    copy.insertInstance(interface, instance);
+
+    return addInternal(std::move(copy));
 }
 
-std::pair<MatrixHal*, VersionRange*> CompatibilityMatrix::getHalWithMajorVersion(
-    const std::string& name, size_t majorVer) {
-    for (MatrixHal* hal : getHals(name)) {
-        VersionRange* vr = findRangeWithMajorVersion(hal->versionRanges, majorVer);
-        if (vr != nullptr) {
-            return {hal, vr};
-        }
-    }
-    return {nullptr, nullptr};
-}
-std::pair<const MatrixHal*, const VersionRange*> CompatibilityMatrix::getHalWithMajorVersion(
-    const std::string& name, size_t majorVer) const {
-    return const_cast<CompatibilityMatrix*>(this)->getHalWithMajorVersion(name, majorVer);
-}
-
+// Add all package@other_version::interface/instance as an optional instance.
+// If package@this_version::interface/instance is in this (that is, some instance
+// with the same package and interface and instance exists), then other_version is
+// considered a possible replacement to this_version.
+// See LibVintfTest.AddOptionalHal* tests for details.
 bool CompatibilityMatrix::addAllHalsAsOptional(CompatibilityMatrix* other, std::string* error) {
     if (other == nullptr || other->level() <= level()) {
         return true;
@@ -108,36 +112,35 @@ bool CompatibilityMatrix::addAllHalsAsOptional(CompatibilityMatrix* other, std::
     for (auto& pair : other->mHals) {
         const std::string& name = pair.first;
         MatrixHal& halToAdd = pair.second;
-        for (const VersionRange& vr : halToAdd.versionRanges) {
-            MatrixHal* existingHal;
-            VersionRange* existingVr;
-            std::tie(existingHal, existingVr) = getHalWithMajorVersion(name, vr.majorVer);
 
-            if (existingHal == nullptr) {
-                MatrixHal optionalHalToAdd(halToAdd);
-                optionalHalToAdd.optional = true;
-                optionalHalToAdd.versionRanges = {vr};
-                if (!add(std::move(optionalHalToAdd))) {
-                    if (error) {
-                        *error = "Cannot add HAL " + name + " for unknown reason.";
-                    }
-                    return false;
+        std::set<std::pair<std::string, std::string>> insertedInstances;
+        auto existingHals = getHals(name);
+
+        halToAdd.forEachInstance([&](const std::vector<VersionRange>& versionRanges,
+                                     const std::string& interface, const std::string& instance) {
+            for (auto* existingHal : existingHals) {
+                MatrixHal* splitInstance = this->splitInstance(existingHal, interface, instance);
+                if (splitInstance != nullptr) {
+                    splitInstance->insertVersionRanges(versionRanges);
+                    insertedInstances.insert(std::make_pair(interface, instance));
                 }
-                continue;
             }
+            return true;
+        });
 
-            if (!existingHal->optional && !existingHal->containsInstances(halToAdd)) {
-                if (error != nullptr) {
-                    *error = "HAL " + toFQNameString(name, vr.minVer()) + " is a required " +
-                             "HAL, but fully qualified instance names don't match (at FCM "
-                             "Version " +
-                             std::to_string(level()) + " and " + std::to_string(other->level()) +
-                             ")";
+        // Add the remaining instances.
+        for (const auto& pair : insertedInstances) {
+            halToAdd.removeInstance(pair.first, pair.second);
+        }
+
+        if (halToAdd.hasAnyInstance()) {
+            halToAdd.setOptional(true);
+            if (!add(std::move(halToAdd))) {
+                if (error) {
+                    *error = "Cannot add HAL " + name + " for unknown reason.";
                 }
                 return false;
             }
-
-            existingVr->maxMinor = std::max(existingVr->maxMinor, vr.maxMinor);
         }
     }
     return true;
@@ -312,20 +315,19 @@ CompatibilityMatrix* CompatibilityMatrix::combine(Level deviceLevel,
     return matrix;
 }
 
-void CompatibilityMatrix::forEachInstance(
-    const std::function<void(const std::string&, const VersionRange&, const std::string&,
-                             const std::string&, bool, bool*)>& f) const {
-    bool stop = false;
-    for (const auto& hal : getHals()) {
-        for (const auto& v : hal.versionRanges) {
-            for (const auto& intf : iterateValues(hal.interfaces)) {
-                for (const auto& instance : intf.instances) {
-                    f(hal.name, v, intf.name, instance, hal.optional, &stop);
-                    if (stop) break;
-                }
+bool CompatibilityMatrix::forEachInstanceOfVersion(
+    const std::string& package, const Version& expectVersion,
+    const std::function<bool(const MatrixInstance&)>& func) const {
+    for (const MatrixHal* hal : getHals(package)) {
+        bool cont = hal->forEachInstance([&](const MatrixInstance& matrixInstance) {
+            if (matrixInstance.versionRange().contains(expectVersion)) {
+                return func(matrixInstance);
             }
-        }
+            return true;
+        });
+        if (!cont) return false;
     }
+    return true;
 }
 
 } // namespace vintf
